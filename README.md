@@ -1,4 +1,4 @@
-# 🚀 Developer Tools Research Agent
+# 🚀 Developer Tools Research Agent CLI
 
 <div align="center">
 

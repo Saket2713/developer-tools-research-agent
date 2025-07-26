@@ -89,13 +89,18 @@ class DeveloperToolsPrompts:
                 - language_support: List of programming languages explicitly supported (e.g., Python, JavaScript, Go, etc.)
                 - integration_capabilities: List of tools/platforms it integrates with (e.g., GitHub, VS Code, Docker, AWS, etc.)
 
-                MARKET INTELLIGENCE (NEVER use null, always use empty string "" if unknown):
-                - market_position: One of "Leader", "Challenger", "Niche", "Emerging" based on market presence (default: "")
-                - company_size: One of "Startup", "SMB", "Enterprise", "Public" based on company indicators (default: "")
-                - funding_status: One of "Bootstrapped", "Seed", "Series A", "Series B", "Series C", "IPO", "Acquired" if mentioned (default: "")
-                - user_base_size: One of "<1K", "1K-10K", "10K-100K", "100K+", "1M+" based on user metrics mentioned (default: "")
+                MARKET INTELLIGENCE (CRITICAL: NEVER use null, always use empty string "" if unknown):
+                - market_position: MUST be one of "Leader", "Challenger", "Niche", "Emerging" based on market presence (default: "Niche")
+                - company_size: MUST be one of "Startup", "SMB", "Enterprise", "Public" based on company indicators (default: "SMB")
+                - funding_status: MUST be one of "Bootstrapped", "Seed", "Series A", "Series B", "Series C", "IPO", "Acquired" if mentioned (default: "Bootstrapped")
+                - user_base_size: MUST be one of "<1K", "1K-10K", "10K-100K", "100K+", "1M+" based on user metrics mentioned (default: "10K-100K")
                 - github_stars: Number if GitHub repository is mentioned, otherwise null
                 - market_trends: List of relevant market trends or growth indicators mentioned (default: [])
+
+                VALIDATION RULES:
+                - ALL string fields must contain actual strings, never null or None
+                - If information is not available, use the specified defaults
+                - Ensure all required fields are populated with valid values
 
                 Focus on both technical capabilities and business/market positioning."""
 
@@ -134,7 +139,10 @@ class DeveloperToolsPrompts:
 
     # Detailed analysis prompts
     DETAILED_ANALYSIS_SYSTEM = """You are a senior technical analyst providing comprehensive tool analysis for developers.
-                                Provide detailed, structured analysis covering all aspects developers need to make informed decisions."""
+                                Provide detailed, structured analysis covering all aspects developers need to make informed decisions.
+
+                                CRITICAL: Follow the EXACT section structure provided. Use the exact headers shown.
+                                Each section must contain meaningful content - never leave sections empty."""
 
     @staticmethod
     def detailed_analysis_user(tool_name: str, content: str, query_context: str) -> str:
@@ -142,56 +150,49 @@ class DeveloperToolsPrompts:
                 Context: {query_context}
                 Website/Documentation Content: {content[:4000]}
 
-                Provide a comprehensive analysis in the following structure:
+                Provide a comprehensive analysis using EXACTLY this structure:
 
                 ## Overview
-                - What this tool does (2-3 sentences)
-                - Primary use cases and target audience
-                - Market position (established/emerging/niche)
+                Provide 2-3 sentences explaining what this tool does, its primary use cases, and market position.
 
-                ## Pros & Cons
                 ### Advantages:
-                - List 4-5 key strengths
+                - List 4-5 key strengths and benefits
                 - Focus on developer experience, features, performance
+                - Use bullet points starting with "-"
 
                 ### Disadvantages:
                 - List 3-4 main limitations or concerns
                 - Include potential deal-breakers
+                - Use bullet points starting with "-"
 
                 ## Technical Deep Dive
-                - Architecture and technology stack
-                - Performance characteristics
-                - Scalability considerations
-                - Security features
-                - API quality and documentation
+                Describe the architecture, technology stack, performance characteristics, scalability, security features, and API quality in paragraph form.
 
-                ## Use Cases & Scenarios
                 ### Best For:
-                - Specific project types or company sizes
-                - Technical requirements it excels at
+                - Specific project types or company sizes where this tool excels
+                - Technical requirements it handles well
+                - Use bullet points starting with "-"
 
                 ### Not Ideal For:
                 - Scenarios where other tools might be better
                 - Technical limitations to consider
+                - Use bullet points starting with "-"
 
                 ## Developer Experience
-                - Learning curve and onboarding
-                - Documentation quality
-                - Community support and ecosystem
-                - Development workflow integration
+                Describe the learning curve, documentation quality, community support, and development workflow integration in paragraph form.
 
                 ## Pricing & Value
-                - Detailed pricing breakdown
-                - Value proposition analysis
-                - Cost comparison considerations
-                - Hidden costs or limitations
+                Provide detailed pricing breakdown, value proposition analysis, and cost considerations in paragraph form.
 
                 ## Alternatives Comparison
-                - How it compares to 2-3 main competitors
-                - Unique differentiators
-                - When to choose this over alternatives
+                Compare to 2-3 main competitors, highlight unique differentiators, and explain when to choose this tool in paragraph form.
 
-                Be thorough but practical - focus on information developers need for decision-making."""
+                IMPORTANT:
+                - Use EXACTLY the headers shown above (## and ###)
+                - Never leave any section empty - always provide meaningful content
+                - For list sections, use bullet points with "-"
+                - For paragraph sections, write in full sentences
+                - Be thorough but practical - focus on actionable information"""
 
     # Comparison matrix prompts
     COMPARISON_MATRIX_SYSTEM = """You are creating detailed side-by-side comparisons of developer tools.

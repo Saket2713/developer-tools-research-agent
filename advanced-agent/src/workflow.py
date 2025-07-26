@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from langgraph.graph import StateGraph, END
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -12,20 +12,68 @@ from .models import ResearchState, CompanyInfo, CompanyAnalysis, DetailedAnalysi
 from .firecrawl import FirecrawlService
 from .prompts import DeveloperToolsPrompts
 import os
-from typing import List
 
 
 class Workflow:
     def __init__(self):
         self.console = Console()
         self.firecrawl = FirecrawlService()
-        self.llm = ChatGroq(
-            model="llama-3.1-8b-instant",  # Faster model with higher rate limits
+
+        # Model fallback system - ordered by preference (speed vs accuracy)
+        self.available_models = [
+            "llama-3.1-8b-instant",      # Fastest, highest rate limits
+            "llama-3.1-70b-versatile",   # Balanced speed and accuracy
+            "llama-3.3-70b-versatile",   # Best accuracy but slower
+            "mixtral-8x7b-32768",        # Alternative high-quality model
+            "gemma2-9b-it",              # Backup option
+        ]
+        self.current_model_index = 0
+        self.llm = self._create_llm()
+        self.prompts = DeveloperToolsPrompts()
+        self.workflow = self._build_workflow()
+
+    def _create_llm(self):
+        """Create LLM instance with current model"""
+        current_model = self.available_models[self.current_model_index]
+        return ChatGroq(
+            model=current_model,
             temperature=0.1,
             groq_api_key=os.getenv("GROQ_API_KEY")
         )
-        self.prompts = DeveloperToolsPrompts()
-        self.workflow = self._build_workflow()
+
+    def _switch_model(self):
+        """Switch to next available model when rate limited"""
+        if self.current_model_index < len(self.available_models) - 1:
+            self.current_model_index += 1
+            old_model = self.available_models[self.current_model_index - 1]
+            new_model = self.available_models[self.current_model_index]
+            self.console.print(f"[yellow]🔄 Switching from {old_model} to {new_model}[/yellow]")
+            self.llm = self._create_llm()
+            return True
+        else:
+            self.console.print(f"[red]❌ All models exhausted. Please wait before retrying.[/red]")
+            return False
+
+    def _invoke_with_fallback(self, messages, operation_name="operation"):
+        """Invoke LLM with automatic model fallback on rate limits"""
+        max_retries = len(self.available_models)
+
+        for attempt in range(max_retries):
+            try:
+                return self.llm.invoke(messages)
+            except Exception as e:
+                error_str = str(e).lower()
+                if "rate_limit" in error_str or "429" in error_str or "quota" in error_str:
+                    self.console.print(f"[yellow]⚠️ Rate limit hit for {operation_name} with {self.available_models[self.current_model_index]}[/yellow]")
+                    if not self._switch_model():
+                        raise e
+                    continue
+                else:
+                    # Non-rate-limit error, re-raise immediately
+                    raise e
+
+        # If we get here, all models failed
+        raise Exception(f"All models failed for {operation_name}")
 
     def _build_workflow(self):
         graph = StateGraph(ResearchState)
@@ -68,7 +116,7 @@ class Workflow:
         ]
 
         try:
-            response = self.llm.invoke(messages)
+            response = self._invoke_with_fallback(messages, "tool extraction")
             raw_tool_names = [
                 name.strip()
                 for name in response.content.strip().split("\n")
@@ -200,9 +248,10 @@ class Workflow:
             "vscode", "intellij", "sublime", "atom", "vim", "emacs", "cursor", "zed",
             "webstorm", "pycharm", "phpstorm", "rubymine", "goland", "clion", "notepad++",
 
-            # AI Coding Assistants
+            # AI Coding Assistants & Modern Editors
             "github copilot", "copilot", "claude code", "codemate", "tabnine", "kite",
-            "codium", "codewhisperer", "replit", "ghostwriter",
+            "codium", "codewhisperer", "replit", "ghostwriter", "cursor", "zed", "windsurf",
+            "aider", "continue", "sourcegraph", "cody", "blackbox", "mintlify", "pieces",
 
             # Version Control
             "git", "github", "gitlab", "bitbucket", "subversion"
@@ -245,18 +294,22 @@ class Workflow:
             # Additional validation: check if tool name has technical indicators
             technical_indicators = [
                 # Programming languages & extensions
-                "js", "py", "go", "rs", "ts", "java", "cpp", "php", "rb", "swift",
+                "js", "py", "go", "rs", "ts", "java", "cpp", "php", "rb", "swift", "kotlin", "scala", "dart",
 
                 # Technical domains
-                "io", "dev", "tech", "code", "soft", "app", "ai", "ml", "data",
+                "io", "dev", "tech", "code", "soft", "app", "ai", "ml", "data", "web", "mobile", "backend", "frontend",
 
                 # Infrastructure & platforms
-                "hub", "lab", "cloud", "server", "base", "stack", "kit", "tool", "platform",
-                "api", "sdk", "framework", "service", "system", "engine", "db", "sql",
+                "hub", "lab", "cloud", "server", "base", "stack", "kit", "tool", "platform", "ops", "deploy",
+                "api", "sdk", "framework", "service", "system", "engine", "db", "sql", "nosql", "graph",
 
                 # Development concepts
-                "editor", "ide", "copilot", "assistant", "mate", "pilot", "studio",
-                "workspace", "terminal", "shell", "cli", "gui", "ui", "ux"
+                "editor", "ide", "copilot", "assistant", "mate", "pilot", "studio", "workspace", "terminal",
+                "shell", "cli", "gui", "ui", "ux", "build", "test", "debug", "lint", "format", "bundle",
+
+                # Modern development terms
+                "ci", "cd", "devops", "microservice", "container", "serverless", "jamstack", "headless",
+                "graphql", "rest", "grpc", "webhook", "oauth", "jwt", "ssl", "tls", "cdn", "edge"
             ]
             has_technical_indicators = any(indicator in tool_lower for indicator in technical_indicators)
 
@@ -387,16 +440,11 @@ class Workflow:
         ]
 
         try:
-            response = self.llm.invoke(messages)
+            response = self._invoke_with_fallback(messages, "analysis generation")
             return {"analysis": response.content}
         except Exception as e:
-            if "rate_limit" in str(e).lower() or "429" in str(e):
-                error_msg = "⚠️ Rate limit reached. Please wait a few minutes before trying again.\n💡 Tip: You can upgrade to Groq Dev Tier for higher limits."
-                self.console.print(f"[yellow]{error_msg}[/yellow]")
-                return {"analysis": f"Analysis temporarily unavailable due to rate limits. Please try again in a few minutes."}
-            else:
-                self.console.print(f"[bold red]❌ Error generating analysis:[/bold red] {e}")
-                return {"analysis": "Analysis failed due to an error."}
+            self.console.print(f"[red]❌ Error generating analysis: {e}[/red]")
+            return {"analysis": "Error generating analysis."}
 
     def run(self, query: str) -> ResearchState:
         initial_state = ResearchState(query=query)
@@ -436,7 +484,7 @@ class Workflow:
             ]
 
             try:
-                response = self.llm.invoke(messages)
+                response = self._invoke_with_fallback(messages, "market leaders extraction")
                 raw_tools = [
                     name.strip()
                     for name in response.content.strip().split("\n")
@@ -478,14 +526,10 @@ class Workflow:
             ]
 
             try:
-                response = self.llm.invoke(messages)
+                response = self._invoke_with_fallback(messages, "detailed analysis")
             except Exception as e:
-                if "rate_limit" in str(e).lower() or "429" in str(e):
-                    self.console.print(f"[yellow]⚠️ Rate limit reached for detailed analysis. Please wait a few minutes.[/yellow]")
-                    return None
-                else:
-                    self.console.print(f"[red]❌ Error generating detailed analysis: {e}[/red]")
-                    return None
+                self.console.print(f"[red]❌ Error generating detailed analysis: {e}[/red]")
+                return None
 
             # Parse the response into structured format
             analysis_text = response.content
@@ -535,14 +579,11 @@ class Workflow:
             ]
 
             try:
-                response = self.llm.invoke(messages)
+                response = self._invoke_with_fallback(messages, "comparison matrix")
                 comparison_text = response.content
             except Exception as e:
-                if "rate_limit" in str(e).lower() or "429" in str(e):
-                    self.console.print(f"[yellow]⚠️ Rate limit reached for comparison. Please wait a few minutes.[/yellow]")
-                    return None
-                else:
-                    raise e
+                self.console.print(f"[red]❌ Error generating comparison: {e}[/red]")
+                return None
 
             # Instead of trying to parse sections, just use the full response as a single comparison
             comparison = ComparisonMatrix(
@@ -562,6 +603,9 @@ class Workflow:
 
     def _extract_section(self, text: str, section_header: str) -> str:
         """Extract content from a specific section"""
+        if not text:
+            return ""
+
         lines = text.split('\n')
         in_section = False
         section_content = []
@@ -571,7 +615,9 @@ class Workflow:
             section_header,
             section_header.replace("## ", ""),
             f"**{section_header.replace('## ', '')}**",
-            f"# {section_header.replace('## ', '')}"
+            f"# {section_header.replace('## ', '')}",
+            section_header.lower(),
+            section_header.upper()
         ]
 
         for line in lines:
@@ -588,26 +634,48 @@ class Workflow:
                 section_content.append(line)
 
         result = '\n'.join(section_content).strip()
-        return result if result else None
+        return result if result else ""
 
     def _extract_list_section(self, text: str, section_header: str) -> List[str]:
         """Extract list items from a section"""
         section_text = self._extract_section(text, section_header)
+        if not section_text:
+            return []
+
         items = []
 
         for line in section_text.split('\n'):
             line = line.strip()
             if line.startswith('- '):
-                items.append(line[2:])
+                items.append(line[2:].strip())
             elif line.startswith('* '):
-                items.append(line[2:])
+                items.append(line[2:].strip())
+            elif line.startswith('• '):
+                items.append(line[2:].strip())
+            elif line and not line.startswith('#') and not line.startswith('**'):
+                # If it's not a header and not empty, treat as list item
+                items.append(line)
 
-        return items
+        return [item for item in items if item]  # Filter out empty items
 
-    def _extract_score(self, text: str) -> int:
+    def _extract_score(self, text: str) -> Optional[int]:
         """Extract recommendation score from text"""
+        if not text:
+            return None
+
         import re
-        score_match = re.search(r'(\d+)/10', text)
-        if score_match:
-            return int(score_match.group(1))
+        # Try different score patterns
+        patterns = [
+            r'(\d+)/10',
+            r'score[:\s]*(\d+)',
+            r'rating[:\s]*(\d+)',
+            r'recommend[:\s]*(\d+)'
+        ]
+
+        for pattern in patterns:
+            score_match = re.search(pattern, text, re.IGNORECASE)
+            if score_match:
+                score = int(score_match.group(1))
+                if 1 <= score <= 10:  # Validate score range
+                    return score
         return None
